@@ -1,0 +1,88 @@
+pragma solidity ^0.8.24;
+
+contract Escrow {
+
+    struct Agreement {
+        address bob;
+        address alice;
+        address arbitrator;
+        uint amount;
+        uint arbitratorFee;
+        bool bobIn;
+        bool aliceIn;
+        bool deliveryConfirmed;
+    }
+
+    Agreement[] public agreements;
+
+    function newAgreement(address _bob, address _alice, uint _amount, uint _arbitratorFee) external returns (uint) {
+        require(_bob != _alice, "same buyer and seller");
+        agreements.push(Agreement(_bob, _alice, msg.sender, _amount, _arbitratorFee, false, false, false));
+        return agreements.length - 1;
+    }
+
+    function deposit(uint _id) external payable {
+        if (msg.sender == agreements[_id].bob && msg.value == agreements[_id].amount) {
+            agreements[_id].bobIn = true;
+        }
+        else if (msg.sender == agreements[_id].alice && msg.value == agreements[_id].amount) {
+            agreements[_id].aliceIn = true;
+        }
+    }
+
+    function refund(uint _id) external {
+        if (msg.sender == agreements[_id].bob && agreements[_id].bobIn == true) {
+            agreements[_id].bobIn = false;
+            payable(agreements[_id].bob).transfer(agreements[_id].amount);
+        }
+        if (msg.sender == agreements[_id].alice && agreements[_id].aliceIn == true) {
+            agreements[_id].aliceIn = false;
+            payable(agreements[_id].alice).transfer(agreements[_id].amount);
+        }
+    }
+
+    function confirmDelivery(uint _id) external {
+        require(msg.sender == agreements[_id].alice, "Only Alice can confirm delivery");
+        require(agreements[_id].bobIn == true, "Bob has not paid");
+        require(agreements[_id].aliceIn == true, "Alice has not paid");
+
+        agreements[_id].deliveryConfirmed = true;
+        agreements[_id].bobIn = false;
+        agreements[_id].aliceIn = false;
+        payable(agreements[_id].bob).transfer(agreements[_id].amount * 2);
+    }
+
+    function requestRefund(uint _id) external {
+        require(msg.sender == agreements[_id].alice, "Only Alice can request a refund");
+        require(agreements[_id].bobIn == true, "Bob has not paid");
+        require(agreements[_id].aliceIn == true, "Alice has not paid");
+        require(agreements[_id].deliveryConfirmed == false, "Delivery already confirmed");
+
+        agreements[_id].bobIn = false;
+        agreements[_id].aliceIn = false;
+        uint refundAmount = agreements[_id].amount * 2 - agreements[_id].arbitratorFee;
+        payable(agreements[_id].alice).transfer(refundAmount);
+        payable(agreements[_id].arbitrator).transfer(agreements[_id].arbitratorFee);
+    }
+
+    function complete(uint _id, address _winner) external {
+        require(msg.sender == agreements[_id].arbitrator, "Only arbitrator can complete");
+        require(agreements[_id].bobIn == true, "Bob has not paid");
+        require(agreements[_id].aliceIn == true, "Alice has not paid");
+        
+        uint paymentAmount = agreements[_id].amount * 2 - agreements[_id].arbitratorFee;
+        
+        if (agreements[_id].bob == _winner) {
+            agreements[_id].bobIn = false;
+            agreements[_id].aliceIn = false;
+            payable(agreements[_id].bob).transfer(paymentAmount);
+            payable(agreements[_id].arbitrator).transfer(agreements[_id].arbitratorFee);
+        }
+        else if (agreements[_id].alice == _winner) {
+            agreements[_id].bobIn = false;
+            agreements[_id].aliceIn = false;
+            payable(agreements[_id].alice).transfer(paymentAmount);
+            payable(agreements[_id].arbitrator).transfer(agreements[_id].arbitratorFee);
+        }
+    }
+}
